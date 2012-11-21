@@ -44,6 +44,7 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
+				<version>2.12.4</version>
 				<configuration>
 					<redirectTestOutputToFile>false</redirectTestOutputToFile>
 				</configuration>
@@ -59,26 +60,10 @@
 	</repositories>
 
 	<dependencies>
+		<!-- Persistence API -->
 		<dependency>
-			<groupId>com.google.guava</groupId>
-			<artifactId>guava</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.hibernate.javax.persistence</groupId>
-			<artifactId>hibernate-jpa-2.0-api</artifactId>
-			<version>1.0.1.Final</version>
-		</dependency>
-
-		<!-- Hibernate -->
-		<dependency>
-			<groupId>org.hibernate</groupId>
-			<artifactId>hibernate-entitymanager</artifactId>
-			<version>4.1.8.Final</version>
-		</dependency>
-		<dependency>
-			<groupId>org.hibernate</groupId>
-			<artifactId>hibernate-validator</artifactId>
-			<version>4.2.0.Final</version>
+			<groupId>org.batoo.jpa</groupId>
+			<artifactId>persistence-api</artifactId>
 		</dependency>
 
 		<!-- Batoo Dependencies -->
@@ -92,19 +77,6 @@
 			<groupId>org.batoo.jpa</groupId>
 			<artifactId>batoo-annotations</artifactId>
 			<version>2.0.0.0-SNAPSHOT</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.batoo.jpa</groupId>
-			<artifactId>parser</artifactId>
-			<version>2.0.0.0-SNAPSHOT</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.batoo.jpa</groupId>
-			<artifactId>jpql</artifactId>
-			<version>2.0.0.0-SNAPSHOT</version>
-			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.batoo.common</groupId>
@@ -112,15 +84,50 @@
 			<scope>test</scope>
 		</dependency>
 
+		<!-- Hibernate -->
+		<dependency>
+			<groupId>org.hibernate</groupId>
+			<artifactId>hibernate-entitymanager</artifactId>
+			<version>4.1.8.Final</version>
+			<exclusions>
+				<exclusion>
+					<artifactId>hibernate-jpa-2.0-api</artifactId>
+					<groupId>org.hibernate.javax.persistence</groupId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>org.hibernate</groupId>
+			<artifactId>hibernate-validator</artifactId>
+			<version>4.2.0.Final</version>
+		</dependency>
+
+		<!-- Eclipselink -->
 		<dependency>
 			<groupId>org.eclipse.persistence</groupId>
 			<artifactId>eclipselink</artifactId>
 			<version>2.4.1</version>
 			<scope>test</scope>
+			<exclusions>
+				<exclusion>
+					<artifactId>javax.persistence</artifactId>
+					<groupId>org.eclipse.persistence</groupId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 
-		<!-- Oracle JDBC <dependency> <groupId>com.oracle</groupId> <artifactId>ojdbc6</artifactId> <version>11.2.0.3</version> <scope>test</scope> 
-			</dependency> -->
+		<!-- Oracle JDBC --> 
+		<!--dependency>
+			<groupId>com.oracle</groupId>
+			<artifactId>ojdbc6</artifactId>
+			<version>11.2.0.3</version>
+			<scope>test</scope> 
+		</dependency-->
+
+		<dependency>
+			<groupId>com.google.guava</groupId>
+			<artifactId>guava</artifactId>
+		</dependency>
 
 		<dependency>
 			<groupId>com.jolbox</groupId>
@@ -184,6 +191,11 @@
 		<dependency>
 			<groupId>hsqldb</groupId>
 			<artifactId>hsqldb</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>postgresql</groupId>
+			<artifactId>postgresql</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>

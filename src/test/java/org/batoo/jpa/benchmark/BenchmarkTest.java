@@ -21,10 +21,12 @@ package org.batoo.jpa.benchmark;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -64,7 +66,7 @@ public class BenchmarkTest {
 	/**
 	 * The number of tests to run
 	 */
-	private static final int BENCHMARK_LENGTH = 5000;
+	private static final int ITERATIONS = Integer.valueOf(BenchmarkTest.getProp("iterations", "100"));
 
 	/**
 	 * If the results should be summarized
@@ -74,27 +76,50 @@ public class BenchmarkTest {
 	/**
 	 * the number of worker thread to simulate concurrency
 	 */
-	private static final int THREAD_COUNT = Runtime.getRuntime().availableProcessors() / 2;
+	private static final int THREAD_COUNT = Integer.valueOf(BenchmarkTest.getProp("threads", Integer.toString(Runtime.getRuntime().availableProcessors() / 2)));
+
+	/**
+	 * the number of worker thread to simulate concurrency
+	 */
+	private static final String DB = BenchmarkTest.getProp("db", "h2");
 
 	/**
 	 * The max test time, the default is 30 mins.
 	 */
-	private static final long MAX_TEST_TIME = 30 * 60 * 1000;
+	private static final long MAX_TEST_TIME = Integer.valueOf(BenchmarkTest.getProp("maxTime", Integer.toString(30 * 60 * 1000)));
+
+	/**
+	 * The sample rate to collect data in microseconds
+	 */
+	private static final int SAMPLE_RATE = 10 ^ Integer.valueOf(BenchmarkTest.getProp("sampling", Integer.toString(2)));;
+
+	private static final boolean FULL_SUMMARY = BenchmarkTest.getProp("fullSummary", null) != null;
 
 	private static final BLogger LOG = BLoggerFactory.getLogger(BenchmarkTest.class);
 
-	private static final boolean FULL_SUMMARY = System.getProperties().get("fullSummary") != null;
 	private static final String SEPARATOR = "________________________________________";
+	private static final String LONG_SEPARATOR = "______________________________________________________";
+
+	private static String getProp(String key, String defaultValue) {
+		final String value = System.getProperty(key);
+
+		return value != null ? value : defaultValue;
+	}
 
 	private Country country;
 	private TimeElement element;
 	private final HashMap<String, TimeElement> elements = Maps.newHashMap();
-	private boolean running;
-
 	private Type type;
 
+	private boolean running;
+
 	private long[] currentThreadTimes;
+
 	private long[] threadIds;
+
+	private int totalSamples;
+
+	private long totalTime;
 
 	private void close(final EntityManager em) {
 		em.getTransaction().commit();
@@ -170,15 +195,6 @@ public class BenchmarkTest {
 		return persons;
 	}
 
-	/**
-	 * 
-	 * @since 2.0.0
-	 */
-	@Test
-	public void dobatoo() {
-		this.doTest(Type.BATOO);
-	}
-
 	private void doBenchmarkCriteria(final EntityManagerFactory emf, Person[][] people, CriteriaQuery<Address> cq, ParameterExpression<Person> p) {
 		for (int i = 0; i < (people.length / 2); i++) {
 			for (final Person person : people[i]) {
@@ -246,24 +262,6 @@ public class BenchmarkTest {
 		this.close(em);
 	}
 
-	/**
-	 * 
-	 * @since 2.0.0
-	 */
-	@Test
-	public void doeclipselink() {
-		this.doTest(Type.ELINK);
-	}
-
-	/**
-	 * 
-	 * @since 2.0.0
-	 */
-	@Test
-	public void dohibernate() {
-		this.doTest(Type.HBRNT);
-	}
-
 	private void doRemove(final EntityManagerFactory emf, Person[][] people) {
 		for (int i = 0; i < (people.length / 2); i++) {
 			for (Person person : people[i]) {
@@ -274,58 +272,6 @@ public class BenchmarkTest {
 				this.doBenchmarkRemove(em, person);
 			}
 		}
-	}
-
-	private void doTest(Type type) {
-		BenchmarkTest.LOG.info("Deploying the persistence unit...");
-
-		final EntityManagerFactory emf = Persistence.createEntityManagerFactory(type.name().toLowerCase());
-
-		BenchmarkTest.LOG.info("Done deploying the persistence unit.");
-
-		BenchmarkTest.LOG.info("Deploying the persistence unit...");
-
-		final EntityManager em = this.open(emf);
-		this.country = new Country();
-
-		this.country.setName("Turkey");
-		em.persist(this.country);
-
-		this.close(em);
-
-		this.threadIds = new long[BenchmarkTest.THREAD_COUNT];
-		this.currentThreadTimes = new long[BenchmarkTest.THREAD_COUNT];
-
-		BenchmarkTest.LOG.info("Done preparing the countries");
-
-		BenchmarkTest.LOG.info("Running the warm up phase...");
-		LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<Runnable>();
-		ExecutorService pool = this.createExecutor(workQueue);
-
-		// warm mup
-		this.test(type, emf, workQueue, BenchmarkTest.BENCHMARK_LENGTH / 5);
-		this.waitUntilFinish(workQueue, pool);
-
-		BenchmarkTest.LOG.info("Done running warm up phase");
-
-		BenchmarkTest.LOG.info("Starting the benchmark with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.BENCHMARK_LENGTH);
-
-		workQueue = new LinkedBlockingQueue<Runnable>();
-		pool = this.createExecutor(workQueue);
-
-		// for real
-		this.test(type, emf, workQueue, BenchmarkTest.BENCHMARK_LENGTH);
-		this.setRunning(true);
-		this.waitUntilFinish(workQueue, pool);
-
-		BenchmarkTest.LOG.info("Benchmark has been completed...");
-
-		try {
-			Thread.sleep(1000);
-		}
-		catch (final InterruptedException e) {}
-
-		emf.close();
 	}
 
 	private void doUpdate(final EntityManagerFactory emf, final Person[][] people) {
@@ -340,7 +286,7 @@ public class BenchmarkTest {
 
 	private boolean isInDb(final StackTraceElement stElement) {
 		return stElement.getClassName().startsWith("org.apache.derby") || stElement.getClassName().startsWith("com.mysql")
-			|| stElement.getClassName().startsWith("org.h2") || stElement.getClassName().startsWith("org.hsqldb.");
+			|| stElement.getClassName().startsWith("org.h2") || stElement.getClassName().startsWith("org.hsqldb");
 	}
 
 	private synchronized boolean isRunning() {
@@ -354,24 +300,46 @@ public class BenchmarkTest {
 	@After
 	public void measureAfter() {
 		if (BenchmarkTest.SUMMARIZE) {
+
+			if (BenchmarkTest.SUMMARIZE && !BenchmarkTest.FULL_SUMMARY) {
+				System.err.println();
+				System.err.println();
+				System.err.println(BenchmarkTest.LONG_SEPARATOR);
+				System.err.println(MessageFormat.format(
+					"Provider: {0}, DB: {1}, Threads: {2}, Iterations: {3}\nTotal Time (msec): {4}, Samples Collected: {5}", this.type, // 0
+					BenchmarkTest.DB, // 1
+					BenchmarkTest.THREAD_COUNT, // 2
+					BenchmarkTest.ITERATIONS, // 3
+					this.totalTime, // 4
+					this.totalSamples // 5
+				));
+				System.err.println(BenchmarkTest.LONG_SEPARATOR);
+				System.err.println("Test Name\tDB Time \tJPA Time   ");
+				System.err.println(BenchmarkTest.SEPARATOR);
+			}
+
 			final MutableLong dbTotalTime = new MutableLong(0);
 			final MutableLong jpaTotalTime = new MutableLong(0);
 			this.element.dump0(this.type, dbTotalTime, jpaTotalTime, BenchmarkTest.FULL_SUMMARY);
 
 			if (!BenchmarkTest.FULL_SUMMARY) {
-				System.out.println(BenchmarkTest.SEPARATOR);
-				System.out.println(//
+				System.err.println(BenchmarkTest.SEPARATOR);
+				System.err.println(//
 				"TOTAL " + this.type.name() + //
 					" \t" + String.format("%08d", dbTotalTime.longValue()) + //
 					" \t" + String.format("%08d", jpaTotalTime.longValue()));
-				System.out.println(BenchmarkTest.SEPARATOR);
-				System.out.println();
+				System.err.println(BenchmarkTest.LONG_SEPARATOR);
+				System.err.println();
+			}
+			else {
+				System.err.println();
+				System.err.println();
 			}
 		}
 		else {
 			this.element.dump1(0, 0);
 
-			System.out.println("\n");
+			System.err.println("\n");
 
 			int rowNo = 0;
 			final ArrayList<TimeElement> elements = Lists.newArrayList(this.elements.values());
@@ -388,7 +356,7 @@ public class BenchmarkTest {
 				element.dump2(rowNo);
 			}
 
-			System.out.println("\n");
+			System.err.println("\n");
 		}
 	}
 
@@ -398,88 +366,44 @@ public class BenchmarkTest {
 	 */
 	@Before
 	public void measureBefore() {
-		if (BenchmarkTest.SUMMARIZE && !BenchmarkTest.FULL_SUMMARY) {
-			System.out.println(BenchmarkTest.SEPARATOR);
-			System.out.println("Test Name\tDB Time \tJPA Time   ");
-			System.out.println(BenchmarkTest.SEPARATOR);
-		}
+		final AtomicInteger nextThreadNo = new AtomicInteger();
+
+		final BlockingQueue<Runnable> profilingQueue = new LinkedBlockingQueue<Runnable>();
+
+		new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS, profilingQueue, new ThreadFactory() {
+
+			@Override
+			public Thread newThread(Runnable r) {
+				final Thread t = new Thread(r);
+				t.setDaemon(true);
+				t.setPriority(Thread.NORM_PRIORITY);
+				t.setName("Profiler-" + nextThreadNo.getAndIncrement());
+				t.setDaemon(true);
+
+				return t;
+			}
+		});
 
 		final Thread t = new Thread(new Runnable() {
 
 			@Override
 			public void run() {
-				BenchmarkTest.this.measureTime();
+				BenchmarkTest.this.measureTimes(profilingQueue);
 			}
 		}, "Profiler");
 
-		t.setDaemon(false);
+		t.setDaemon(true);
 		t.start();
 	}
 
-	/**
-	 * @since 2.0.0
-	 */
-	protected void measureTime() {
-		try {
-			this.element = new TimeElement("");
-
-			// get the MXBean
-			final ThreadMXBean mxBean = ManagementFactory.getThreadMXBean();
-
-			// wait till the warm up period is over
-			while (!BenchmarkTest.this.isRunning()) {
-				try {
-					Thread.sleep(1);
-				}
-				catch (final InterruptedException e) {}
-			}
-
-			try {
-				Thread.sleep(100);
-			}
-			catch (final InterruptedException e1) {}
-
-			// initialize the start times of the threads
-			for (int i = 0; i < this.threadIds.length; i++) {
-				this.currentThreadTimes[i] = mxBean.getThreadCpuTime(this.threadIds[i]);
-			}
-
-			// profile until the benchmark is over
-			while (BenchmarkTest.this.isRunning()) {
-				try {
-					this.measureTimes(mxBean);
-
-					Thread.sleep(0, 10);
-				}
-				catch (final InterruptedException e) {}
-			}
-		}
-		catch (final Exception e) {
-			BenchmarkTest.LOG.fatal(e, "");
-		}
-	}
-
-	/**
-	 * @param oldTime
-	 *            the oldTime
-	 * @param threadInfo
-	 *            the theread info
-	 * @param newTime
-	 *            the new time
-	 * @return
-	 * 
-	 * @since $version
-	 */
-	private long measureTime(long oldTime, ThreadInfo threadInfo, long newTime) {
-		final long timeDiff = Math.abs(newTime - oldTime);
-
+	private void measureTime(long worked, ThreadInfo threadInfo) {
 		TimeElement child = this.element;
 		boolean gotStart = false;
 		boolean last = false;
 
 		boolean inDb = false;
 		if (threadInfo == null) {
-			return newTime;
+			return;
 		}
 
 		for (int i = threadInfo.getStackTrace().length - 1; i >= 0; i--) {
@@ -510,31 +434,80 @@ public class BenchmarkTest {
 			}
 
 			if (this.isInDb(stElement) || (i == 0)) {
-				child.addTime(timeDiff, true, inDb);
-				child2.addTime(timeDiff, true, inDb);
+				child.addTime(worked, true, inDb);
+				child2.addTime(worked, true, inDb);
 				last = true;
 			}
 			else {
-				child.addTime(timeDiff, false, inDb);
-				child2.addTime(timeDiff, false, inDb);
+				child.addTime(worked, false, inDb);
+				child2.addTime(worked, false, inDb);
 			}
 
 			if (last) {
 				break;
 			}
 		}
-
-		return newTime;
 	}
 
-	private void measureTimes(final ThreadMXBean mxBean) {
+	private void measureTimes(Queue<Runnable> profilingQueue) {
+		try {
+			this.element = new TimeElement("");
+
+			// get the MXBean
+			final ThreadMXBean mxBean = ManagementFactory.getThreadMXBean();
+
+			// wait till the warm up period is over
+			while (!BenchmarkTest.this.isRunning()) {
+				try {
+					Thread.sleep(1);
+				}
+				catch (final InterruptedException e) {}
+			}
+
+			try {
+				Thread.sleep(100);
+			}
+			catch (final InterruptedException e1) {}
+
+			// initialize the start times of the threads
+			for (int i = 0; i < this.threadIds.length; i++) {
+				this.currentThreadTimes[i] = mxBean.getThreadCpuTime(this.threadIds[i]);
+			}
+
+			// profile until the benchmark is over
+			while (BenchmarkTest.this.isRunning()) {
+				try {
+					this.measureTimes(mxBean, profilingQueue);
+
+					this.totalSamples++;
+
+					Thread.sleep(BenchmarkTest.SAMPLE_RATE / 1000, BenchmarkTest.SAMPLE_RATE % 1000);
+				}
+				catch (final InterruptedException e) {}
+			}
+		}
+		catch (final Exception e) {
+			BenchmarkTest.LOG.fatal(e, "");
+		}
+	}
+
+	private void measureTimes(final ThreadMXBean mxBean, Queue<Runnable> profilingQueue) {
 		final ThreadInfo[] threadInfos = mxBean.getThreadInfo(this.threadIds, Integer.MAX_VALUE);
 
-		for (int ii = 0; ii < this.threadIds.length; ii++) {
-			final long id = this.threadIds[ii];
-			final ThreadInfo threadInfo = threadInfos[ii];
+		for (int i = 0; i < this.threadIds.length; i++) {
+			final long id = this.threadIds[i];
+			final ThreadInfo threadInfo = threadInfos[i];
 
-			this.currentThreadTimes[ii] = this.measureTime(this.currentThreadTimes[ii], threadInfo, mxBean.getThreadCpuTime(id));
+			final long newThreadTime = mxBean.getThreadCpuTime(id);
+			final long worked = Math.abs(newThreadTime - this.currentThreadTimes[i]);
+
+			profilingQueue.add(new Runnable() {
+
+				@Override
+				public void run() {
+					BenchmarkTest.this.measureTime(worked, threadInfo);
+				}
+			});
 		}
 	}
 
@@ -595,6 +568,72 @@ public class BenchmarkTest {
 		}
 	}
 
+	/**
+	 * Main test entry point
+	 * 
+	 * @since $version
+	 */
+	@Test
+	public void testJpa() {
+		this.type = Type.valueOf(BenchmarkTest.getProp("test", "batoo").toUpperCase(Locale.ENGLISH));
+
+		Thread.currentThread().setContextClassLoader(new TestClassLoader(BenchmarkTest.DB, Thread.currentThread().getContextClassLoader()));
+
+		BenchmarkTest.LOG.info("Benchmark will be run for {0}", this.type);
+
+		BenchmarkTest.LOG.info("Deploying the persistence unit...");
+
+		final EntityManagerFactory emf = Persistence.createEntityManagerFactory(this.type.name().toLowerCase());
+
+		BenchmarkTest.LOG.info("Done deploying the persistence unit.");
+
+		BenchmarkTest.LOG.info("Deploying the persistence unit...");
+
+		final EntityManager em = this.open(emf);
+		this.country = new Country();
+
+		this.country.setName("Turkey");
+		em.persist(this.country);
+
+		this.close(em);
+
+		this.threadIds = new long[BenchmarkTest.THREAD_COUNT];
+		this.currentThreadTimes = new long[BenchmarkTest.THREAD_COUNT];
+
+		BenchmarkTest.LOG.info("Done preparing the countries");
+
+		BenchmarkTest.LOG.info("Running the warm up phase with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS / 5);
+		LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<Runnable>();
+		ExecutorService pool = this.createExecutor(workQueue);
+
+		// warm mup
+		this.test(this.type, emf, workQueue, BenchmarkTest.ITERATIONS / 5);
+		this.waitUntilFinish(workQueue, pool);
+
+		BenchmarkTest.LOG.info("Done running warm up phase");
+
+		BenchmarkTest.LOG.info("Starting the benchmark with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS);
+
+		workQueue = new LinkedBlockingQueue<Runnable>();
+		pool = this.createExecutor(workQueue);
+
+		final long started = System.currentTimeMillis();
+		// for real
+		this.test(this.type, emf, workQueue, BenchmarkTest.ITERATIONS);
+		this.setRunning(true);
+		this.waitUntilFinish(workQueue, pool);
+		this.totalTime = (System.currentTimeMillis() - started);
+
+		BenchmarkTest.LOG.info("Benchmark has been completed...");
+
+		try {
+			Thread.sleep(1000);
+		}
+		catch (final InterruptedException e) {}
+
+		emf.close();
+	}
+
 	private void waitUntilFinish(LinkedBlockingQueue<Runnable> workQueue, ExecutorService pool) {
 		try {
 			final long started = System.currentTimeMillis();
@@ -606,13 +645,24 @@ public class BenchmarkTest {
 					throw new IllegalStateException("Max allowed test time exceeded");
 				}
 
-				Thread.sleep(10000);
+				for (int i = 0; i < 250; i++) {
+					if (workQueue.isEmpty()) {
+						break;
+					}
+
+					Thread.sleep(10);
+				}
 			}
 
-			if (pool.awaitTermination(10, TimeUnit.SECONDS)) {
+			pool.shutdown();
+
+			if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
 				BenchmarkTest.LOG.warn("Forcefully shutting down the thread pool");
+
 				pool.shutdownNow();
 			}
+
+			BenchmarkTest.LOG.warn("Iterations completed");
 		}
 		catch (final InterruptedException e) {
 			throw new RuntimeException(e);

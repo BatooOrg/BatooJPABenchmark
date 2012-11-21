@@ -66,7 +66,7 @@ public class TimeElement extends HashMap<String, TimeElement> implements Compara
 		this.hits++;
 		this.time += used;
 
-		if (!inDb) {
+		if (inDb) {
 			this.timeWithoutDb += used;
 		}
 
@@ -110,12 +110,12 @@ public class TimeElement extends HashMap<String, TimeElement> implements Compara
 			jpaTotalTime.add(jpaTime);
 
 			if (fullSummary) {
-				System.out.println(//
+				System.err.println(//
 				String.format("%08d", dbTime) + //
 					" \t" + String.format("%08d", jpaTime));
 			}
 			else {
-				System.out.println(//
+				System.err.println(//
 				this.key.substring(nameStart + 11) + " Test" + //
 					" \t" + String.format("%08d", dbTime) + //
 					" \t" + String.format("%08d", jpaTime));
@@ -142,7 +142,7 @@ public class TimeElement extends HashMap<String, TimeElement> implements Compara
 		if ((depth > 0) && (this.timeWithoutDb > 10000000)) {
 			rowNo++;
 			final String tabs = StringUtils.repeat(" ", depth);
-			System.out.println(String.format("%010d", rowNo) + //
+			System.err.println(String.format("%010d", rowNo) + //
 				" " + String.format("%010d", depth) + //
 				" " + String.format("%010d", this.hits) + //
 				" " + String.format("%010d", this.selfHit) + //
@@ -168,7 +168,7 @@ public class TimeElement extends HashMap<String, TimeElement> implements Compara
 	 * @since 2.0.0
 	 */
 	public void dump2(int rowNo) {
-		System.out.println(String.format("%010d", rowNo) + //
+		System.err.println(String.format("%010d", rowNo) + //
 			" " + String.format("%010d", this.hits) + //
 			" " + String.format("%010d", this.selfHit) + //
 			" " + this.key);
