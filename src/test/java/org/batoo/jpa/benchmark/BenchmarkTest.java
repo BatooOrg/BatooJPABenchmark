@@ -637,12 +637,12 @@ public class BenchmarkTest {
 
 		BenchmarkTest.LOG.info("Done preparing the countries");
 
-		BenchmarkTest.LOG.info("Running the warm up phase with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS / 5);
+		BenchmarkTest.LOG.info("Running the warm up phase with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS / 10);
 		LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<Runnable>();
 		ThreadPoolExecutor pool = this.createExecutor(workQueue);
 
 		// warm mup
-		this.test(emf, workQueue, BenchmarkTest.ITERATIONS / 100);
+		this.test(emf, workQueue, BenchmarkTest.ITERATIONS / 10);
 		this.waitUntilFinish(pool);
 
 		BenchmarkTest.LOG.info("Done running warm up phase");
