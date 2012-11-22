@@ -29,7 +29,6 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -47,6 +46,7 @@ import javax.persistence.criteria.JoinType;
 import javax.persistence.criteria.ParameterExpression;
 import javax.persistence.criteria.Root;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.batoo.common.log.BLogger;
 import org.batoo.common.log.BLoggerFactory;
@@ -63,10 +63,12 @@ import com.google.common.collect.Maps;
  */
 public class BenchmarkTest {
 
+	private static Type TYPE = Type.valueOf(BenchmarkTest.getProp("provider", "batoo").toUpperCase(Locale.ENGLISH));
+
 	/**
 	 * The number of tests to run
 	 */
-	private static final int ITERATIONS = Integer.valueOf(BenchmarkTest.getProp("iterations", "100"));
+	private static final int ITERATIONS = Integer.valueOf(BenchmarkTest.getProp("iterations", "1000"));
 
 	/**
 	 * If the results should be summarized
@@ -89,9 +91,9 @@ public class BenchmarkTest {
 	private static final long MAX_TEST_TIME = Integer.valueOf(BenchmarkTest.getProp("maxTime", Integer.toString(30 * 60 * 1000)));
 
 	/**
-	 * The sample rate to collect data in microseconds
+	 * The sample rate to collect data in milliseconds
 	 */
-	private static final int SAMPLE_RATE = 10 ^ Integer.valueOf(BenchmarkTest.getProp("sampling", Integer.toString(2)));;
+	private static final int SAMPLING_INT = Integer.valueOf(BenchmarkTest.getProp("interval", Integer.toString(5)));;
 
 	private static final boolean FULL_SUMMARY = BenchmarkTest.getProp("fullSummary", null) != null;
 
@@ -109,17 +111,15 @@ public class BenchmarkTest {
 	private Country country;
 	private TimeElement element;
 	private final HashMap<String, TimeElement> elements = Maps.newHashMap();
-	private Type type;
 
 	private boolean running;
 
 	private long[] currentThreadTimes;
-
 	private long[] threadIds;
 
-	private int totalSamples;
-
 	private long totalTime;
+	private ArrayList<Runnable> profilingQueue;
+	private boolean samplingFinished;
 
 	private void close(final EntityManager em) {
 		em.getTransaction().commit();
@@ -127,10 +127,10 @@ public class BenchmarkTest {
 		em.close();
 	}
 
-	private ExecutorService createExecutor(BlockingQueue<Runnable> workQueue) {
+	private ThreadPoolExecutor createExecutor(BlockingQueue<Runnable> workQueue) {
 		final AtomicInteger nextThreadNo = new AtomicInteger(0);
 
-		final ThreadPoolExecutor pool = new ThreadPoolExecutor(//
+		final ThreadPoolExecutor executor = new ThreadPoolExecutor(//
 			BenchmarkTest.THREAD_COUNT, BenchmarkTest.THREAD_COUNT, // min max threads
 			0L, TimeUnit.MILLISECONDS, // the keep alive time - hold it forever
 			workQueue, new ThreadFactory() {
@@ -140,6 +140,7 @@ public class BenchmarkTest {
 					final Thread t = new Thread(r);
 					t.setDaemon(true);
 					t.setPriority(Thread.NORM_PRIORITY);
+					t.setName("Benchmark-" + nextThreadNo.get());
 
 					BenchmarkTest.this.threadIds[nextThreadNo.getAndIncrement()] = t.getId();
 
@@ -147,9 +148,9 @@ public class BenchmarkTest {
 				}
 			});
 
-		pool.prestartAllCoreThreads();
+		executor.prestartAllCoreThreads();
 
-		return pool;
+		return executor;
 	}
 
 	private Person[][] createPersons() {
@@ -263,8 +264,8 @@ public class BenchmarkTest {
 	}
 
 	private void doRemove(final EntityManagerFactory emf, Person[][] people) {
-		for (int i = 0; i < (people.length / 2); i++) {
-			for (Person person : people[i]) {
+		for (final Person[] element2 : people) {
+			for (Person person : element2) {
 				final EntityManager em = this.open(emf);
 
 				person = em.find(Person.class, person.getId());
@@ -284,13 +285,34 @@ public class BenchmarkTest {
 		}
 	}
 
+	private String etaToString(int time) {
+		float timeleft = time;
+
+		final int days = (int) ((timeleft - (timeleft % 86400)) / 86400);
+		timeleft %= 86400;
+
+		final int hours = (int) ((timeleft - (timeleft % 3600)) / 3600);
+		timeleft %= 3600;
+
+		final int mins = (int) ((timeleft - (timeleft % 60)) / 60);
+		timeleft %= 60;
+
+		final int secs = (int) timeleft;
+
+		if (days == 0) {
+			if (hours == 0) {
+				return MessageFormat.format("{0,number,00} min(s) {1,number,00} sec(s)", mins, secs);
+			}
+
+			return MessageFormat.format("{0} hour(s) {1,number,00} min(s) {2,number,00} sec(s)", hours, mins, secs);
+		}
+
+		return MessageFormat.format("{0} {1,number,00} hour(s) {2,number,00} min(s) {3,number,00} sec(s)", days, hours, mins, secs);
+	}
+
 	private boolean isInDb(final StackTraceElement stElement) {
 		return stElement.getClassName().startsWith("org.apache.derby") || stElement.getClassName().startsWith("com.mysql")
 			|| stElement.getClassName().startsWith("org.h2") || stElement.getClassName().startsWith("org.hsqldb");
-	}
-
-	private synchronized boolean isRunning() {
-		return this.running;
 	}
 
 	/**
@@ -299,19 +321,25 @@ public class BenchmarkTest {
 	 */
 	@After
 	public void measureAfter() {
+		final ThreadPoolExecutor executor = this.postProcess();
+
 		if (BenchmarkTest.SUMMARIZE) {
+
+			this.waitUntilFinish(executor);
 
 			if (BenchmarkTest.SUMMARIZE && !BenchmarkTest.FULL_SUMMARY) {
 				System.err.println();
 				System.err.println();
 				System.err.println(BenchmarkTest.LONG_SEPARATOR);
-				System.err.println(MessageFormat.format(
-					"Provider: {0}, DB: {1}, Threads: {2}, Iterations: {3}\nTotal Time (msec): {4}, Samples Collected: {5}", this.type, // 0
+				System.err.println(MessageFormat.format(//
+					"Provider {0} | DB {1} | Threads {2} | Iterations {3}" + //
+						"\nTotal Run Time {4} (msec) | Samples Collected {5}", //
+					BenchmarkTest.TYPE, // 0
 					BenchmarkTest.DB, // 1
 					BenchmarkTest.THREAD_COUNT, // 2
 					BenchmarkTest.ITERATIONS, // 3
 					this.totalTime, // 4
-					this.totalSamples // 5
+					this.profilingQueue.size() // 5
 				));
 				System.err.println(BenchmarkTest.LONG_SEPARATOR);
 				System.err.println("Test Name\tDB Time \tJPA Time   ");
@@ -320,12 +348,12 @@ public class BenchmarkTest {
 
 			final MutableLong dbTotalTime = new MutableLong(0);
 			final MutableLong jpaTotalTime = new MutableLong(0);
-			this.element.dump0(this.type, dbTotalTime, jpaTotalTime, BenchmarkTest.FULL_SUMMARY);
+			this.element.dump0(BenchmarkTest.TYPE, dbTotalTime, jpaTotalTime, BenchmarkTest.FULL_SUMMARY);
 
 			if (!BenchmarkTest.FULL_SUMMARY) {
 				System.err.println(BenchmarkTest.SEPARATOR);
 				System.err.println(//
-				"TOTAL " + this.type.name() + //
+				"TOTAL " + BenchmarkTest.TYPE.name() + //
 					" \t" + String.format("%08d", dbTotalTime.longValue()) + //
 					" \t" + String.format("%08d", jpaTotalTime.longValue()));
 				System.err.println(BenchmarkTest.LONG_SEPARATOR);
@@ -366,33 +394,18 @@ public class BenchmarkTest {
 	 */
 	@Before
 	public void measureBefore() {
-		final AtomicInteger nextThreadNo = new AtomicInteger();
-
-		final BlockingQueue<Runnable> profilingQueue = new LinkedBlockingQueue<Runnable>();
-
-		new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS, profilingQueue, new ThreadFactory() {
-
-			@Override
-			public Thread newThread(Runnable r) {
-				final Thread t = new Thread(r);
-				t.setDaemon(true);
-				t.setPriority(Thread.NORM_PRIORITY);
-				t.setName("Profiler-" + nextThreadNo.getAndIncrement());
-				t.setDaemon(true);
-
-				return t;
-			}
-		});
+		this.profilingQueue = Lists.newArrayList();
 
 		final Thread t = new Thread(new Runnable() {
 
 			@Override
 			public void run() {
-				BenchmarkTest.this.measureTimes(profilingQueue);
+				BenchmarkTest.this.measureTimes(BenchmarkTest.this.profilingQueue);
 			}
 		}, "Profiler");
 
 		t.setDaemon(true);
+		t.setPriority(Thread.MAX_PRIORITY);
 		t.start();
 	}
 
@@ -449,7 +462,7 @@ public class BenchmarkTest {
 		}
 	}
 
-	private void measureTimes(Queue<Runnable> profilingQueue) {
+	private void measureTimes(ArrayList<Runnable> profilingQueue) {
 		try {
 			this.element = new TimeElement("");
 
@@ -457,7 +470,7 @@ public class BenchmarkTest {
 			final ThreadMXBean mxBean = ManagementFactory.getThreadMXBean();
 
 			// wait till the warm up period is over
-			while (!BenchmarkTest.this.isRunning()) {
+			while (!this.running) {
 				try {
 					Thread.sleep(1);
 				}
@@ -474,24 +487,35 @@ public class BenchmarkTest {
 				this.currentThreadTimes[i] = mxBean.getThreadCpuTime(this.threadIds[i]);
 			}
 
+			BenchmarkTest.LOG.info("Sampling interval: {0} millisec(s)", BenchmarkTest.SAMPLING_INT);
+
+			long lastTime = System.currentTimeMillis();
+
 			// profile until the benchmark is over
-			while (BenchmarkTest.this.isRunning()) {
+			while (BenchmarkTest.this.running) {
 				try {
-					this.measureTimes(mxBean, profilingQueue);
+					final long now = System.currentTimeMillis();
+					final long diff = Math.abs(now - lastTime);
+					if (diff > BenchmarkTest.SAMPLING_INT) {
+						this.measureTimes(mxBean, profilingQueue);
 
-					this.totalSamples++;
-
-					Thread.sleep(BenchmarkTest.SAMPLE_RATE / 1000, BenchmarkTest.SAMPLE_RATE % 1000);
+						lastTime = now;
+					}
+					else {
+						Thread.sleep(1);
+					}
 				}
 				catch (final InterruptedException e) {}
 			}
+
+			this.samplingFinished = true;
 		}
 		catch (final Exception e) {
 			BenchmarkTest.LOG.fatal(e, "");
 		}
 	}
 
-	private void measureTimes(final ThreadMXBean mxBean, Queue<Runnable> profilingQueue) {
+	private void measureTimes(final ThreadMXBean mxBean, ArrayList<Runnable> profilingQueue) {
 		final ThreadInfo[] threadInfos = mxBean.getThreadInfo(this.threadIds, Integer.MAX_VALUE);
 
 		for (int i = 0; i < this.threadIds.length; i++) {
@@ -500,6 +524,7 @@ public class BenchmarkTest {
 
 			final long newThreadTime = mxBean.getThreadCpuTime(id);
 			final long worked = Math.abs(newThreadTime - this.currentThreadTimes[i]);
+			this.currentThreadTimes[i] = newThreadTime;
 
 			profilingQueue.add(new Runnable() {
 
@@ -519,8 +544,22 @@ public class BenchmarkTest {
 		return em;
 	}
 
-	private synchronized void setRunning(boolean running) {
-		this.running = running;
+	private ThreadPoolExecutor postProcess() {
+		while (!this.samplingFinished) {
+			try {
+				Thread.currentThread();
+				Thread.sleep(100);
+			}
+			catch (final InterruptedException e) {}
+		}
+
+		final LinkedBlockingQueue<Runnable> processingQueue = new LinkedBlockingQueue<Runnable>(this.profilingQueue);
+
+		final int nThreads = Runtime.getRuntime().availableProcessors();
+		final ThreadPoolExecutor executor = new ThreadPoolExecutor(nThreads, nThreads, 0L, TimeUnit.MILLISECONDS, processingQueue);
+		executor.prestartAllCoreThreads();
+
+		return executor;
 	}
 
 	private void singleTest(final EntityManagerFactory emf, Person[][] persons, CriteriaQuery<Address> cq, ParameterExpression<Person> p) {
@@ -537,9 +576,7 @@ public class BenchmarkTest {
 		this.doRemove(emf, persons);
 	}
 
-	private void test(Type type, final EntityManagerFactory emf, Queue<Runnable> workQueue, int length) {
-		this.type = type;
-
+	private void test(final EntityManagerFactory emf, Queue<Runnable> workQueue, int length) {
 		final CriteriaBuilder cb = emf.getCriteriaBuilder();
 		final CriteriaQuery<Address> cq = cb.createQuery(Address.class);
 
@@ -575,15 +612,13 @@ public class BenchmarkTest {
 	 */
 	@Test
 	public void testJpa() {
-		this.type = Type.valueOf(BenchmarkTest.getProp("test", "batoo").toUpperCase(Locale.ENGLISH));
-
 		Thread.currentThread().setContextClassLoader(new TestClassLoader(BenchmarkTest.DB, Thread.currentThread().getContextClassLoader()));
 
-		BenchmarkTest.LOG.info("Benchmark will be run for {0}", this.type);
+		BenchmarkTest.LOG.info("Benchmark will be run for {0}@{1}", BenchmarkTest.TYPE.name().toLowerCase(Locale.ENGLISH), BenchmarkTest.DB);
 
 		BenchmarkTest.LOG.info("Deploying the persistence unit...");
 
-		final EntityManagerFactory emf = Persistence.createEntityManagerFactory(this.type.name().toLowerCase());
+		final EntityManagerFactory emf = Persistence.createEntityManagerFactory(BenchmarkTest.TYPE.name().toLowerCase());
 
 		BenchmarkTest.LOG.info("Done deploying the persistence unit.");
 
@@ -604,11 +639,11 @@ public class BenchmarkTest {
 
 		BenchmarkTest.LOG.info("Running the warm up phase with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS / 5);
 		LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<Runnable>();
-		ExecutorService pool = this.createExecutor(workQueue);
+		ThreadPoolExecutor pool = this.createExecutor(workQueue);
 
 		// warm mup
-		this.test(this.type, emf, workQueue, BenchmarkTest.ITERATIONS / 5);
-		this.waitUntilFinish(workQueue, pool);
+		this.test(emf, workQueue, BenchmarkTest.ITERATIONS / 100);
+		this.waitUntilFinish(pool);
 
 		BenchmarkTest.LOG.info("Done running warm up phase");
 
@@ -619,9 +654,10 @@ public class BenchmarkTest {
 
 		final long started = System.currentTimeMillis();
 		// for real
-		this.test(this.type, emf, workQueue, BenchmarkTest.ITERATIONS);
-		this.setRunning(true);
-		this.waitUntilFinish(workQueue, pool);
+		this.test(emf, workQueue, BenchmarkTest.ITERATIONS);
+		this.running = true;
+		this.waitUntilFinish(pool);
+		this.running = false;
 		this.totalTime = (System.currentTimeMillis() - started);
 
 		BenchmarkTest.LOG.info("Benchmark has been completed...");
@@ -634,32 +670,63 @@ public class BenchmarkTest {
 		emf.close();
 	}
 
-	private void waitUntilFinish(LinkedBlockingQueue<Runnable> workQueue, ExecutorService pool) {
+	private void waitUntilFinish(ThreadPoolExecutor executor) {
+		final BlockingQueue<Runnable> workQueue = executor.getQueue();
 		try {
 			final long started = System.currentTimeMillis();
 
-			while (!workQueue.isEmpty()) {
-				BenchmarkTest.LOG.info("{0} iterations to go...", workQueue.size());
+			int lastToGo = workQueue.size();
 
-				if ((System.currentTimeMillis() - started) > BenchmarkTest.MAX_TEST_TIME) {
+			final int total = workQueue.size();
+			int performed = 0;
+
+			int maxStatusMessageLength = 0;
+			while (!workQueue.isEmpty()) {
+				final float doneNow = lastToGo - workQueue.size();
+				performed += doneNow;
+
+				final float elapsed = (System.currentTimeMillis() - started) / 1000;
+
+				lastToGo = workQueue.size();
+
+				if (performed > 0) {
+					final float throughput = performed / elapsed;
+					final float eta = ((elapsed * total) / performed) - elapsed;
+
+					final float percentDone = (100 * (float) lastToGo) / total;
+					final int gaugeDone = (int) ((100 - percentDone) / 5);
+					final String gauge = "[" + StringUtils.repeat("✓", gaugeDone) + StringUtils.repeat("-", 20 - gaugeDone) + "]";
+
+					final String sampling = this.profilingQueue.size() > 0 ? MessageFormat.format(" | Samples {0}", this.profilingQueue.size()) : "";
+
+					if ((maxStatusMessageLength != 0) || (eta > 5)) {
+						String statusMessage = MessageFormat.format(
+							"\r{4} %{5,number,00.00} | ETA {2} | LAST TPS {0} ops / sec | AVG TPS {1,number,#.0} | LEFT {3}{6}", //
+							doneNow, throughput, this.etaToString((int) eta), workQueue.size(), gauge, percentDone, sampling);
+
+						maxStatusMessageLength = Math.max(statusMessage.length(), maxStatusMessageLength);
+						statusMessage = StringUtils.leftPad(statusMessage, maxStatusMessageLength - statusMessage.length());
+						System.out.print(statusMessage);
+					}
+				}
+
+				if (elapsed > BenchmarkTest.MAX_TEST_TIME) {
 					throw new IllegalStateException("Max allowed test time exceeded");
 				}
 
-				for (int i = 0; i < 250; i++) {
-					if (workQueue.isEmpty()) {
-						break;
-					}
-
-					Thread.sleep(10);
-				}
+				Thread.sleep(1000);
 			}
 
-			pool.shutdown();
+			if (maxStatusMessageLength > 0) {
+				System.out.print("\r" + StringUtils.repeat(" ", maxStatusMessageLength) + "\r");
+			}
 
-			if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
+			executor.shutdown();
+
+			if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
 				BenchmarkTest.LOG.warn("Forcefully shutting down the thread pool");
 
-				pool.shutdownNow();
+				executor.shutdownNow();
 			}
 
 			BenchmarkTest.LOG.warn("Iterations completed");
