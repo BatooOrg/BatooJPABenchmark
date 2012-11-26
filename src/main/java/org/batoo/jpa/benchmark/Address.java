@@ -46,7 +46,6 @@ public class Address {
 	private Person person;
 
 	@ManyToOne
-	@FetchStrategy(strategy = FetchStrategyType.SELECT)
 	private Country country;
 
 	private String city;

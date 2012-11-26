@@ -43,6 +43,7 @@
 <!-- 			<property name="org.batoo.jpa.sql_logging" value="STDOUT"/> -->
 			<property name="org.batoo.jdbc.max_fetch_join_depth" value="0"/>
 			<property name="org.batoo.jdbc.insert_batch_size" value="1"/>
+			<property name="org.batoo.jdbc.remove_batch_size" value="1"/>
 		</properties>
 
 	</persistence-unit>

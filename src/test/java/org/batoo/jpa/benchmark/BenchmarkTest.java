@@ -714,7 +714,7 @@ public class BenchmarkTest {
 
 					if ((maxStatusMessageLength != 0) || (eta > 5)) {
 						String statusMessage = MessageFormat.format(
-							"\r{4} %{5,number,00.00} | ETA {2} | LAST TPS {0} ops / sec | AVG TPS {1,number,#.0} | LEFT {3}{6}", //
+							"\r{4} %{5,number,00.00} | ETA {2} | LAST TPS {0,number,000} ops / sec | AVG TPS {1,number,000.0} | LEFT {3,number,00000}{6}", //
 							doneNow, throughput, this.etaToString((int) eta), workQueue.size(), gauge, percentDone, sampling);
 
 						maxStatusMessageLength = Math.max(statusMessage.length(), maxStatusMessageLength);
