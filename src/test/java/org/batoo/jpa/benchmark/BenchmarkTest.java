@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -68,7 +69,7 @@ public class BenchmarkTest {
 	/**
 	 * The number of tests to run
 	 */
-	private static final int ITERATIONS = Integer.valueOf(BenchmarkTest.getProp("iterations", "1000"));
+	private static final int ITERATIONS = Integer.valueOf(BenchmarkTest.getProp("iterations", "10000"));
 
 	/**
 	 * If the results should be summarized
@@ -264,8 +265,9 @@ public class BenchmarkTest {
 	}
 
 	private void doRemove(final EntityManagerFactory emf, Person[][] people) {
-		for (final Person[] element2 : people) {
-			for (Person person : element2) {
+		for (int i = 0; i < (people.length / 2); i++) {
+			final Person[] persons = people[i];
+			for (Person person : persons) {
 				final EntityManager em = this.open(emf);
 
 				person = em.find(Person.class, person.getId());
@@ -612,62 +614,73 @@ public class BenchmarkTest {
 	 */
 	@Test
 	public void testJpa() {
-		Thread.currentThread().setContextClassLoader(new TestClassLoader(BenchmarkTest.DB, Thread.currentThread().getContextClassLoader()));
+		final TestClassLoader classLoader = new TestClassLoader(BenchmarkTest.DB, Thread.currentThread().getContextClassLoader());
+		Thread.currentThread().setContextClassLoader(classLoader);
 
 		BenchmarkTest.LOG.info("Benchmark will be run for {0}@{1}", BenchmarkTest.TYPE.name().toLowerCase(Locale.ENGLISH), BenchmarkTest.DB);
 
 		BenchmarkTest.LOG.info("Deploying the persistence unit...");
 
-		final EntityManagerFactory emf = Persistence.createEntityManagerFactory(BenchmarkTest.TYPE.name().toLowerCase());
-
-		BenchmarkTest.LOG.info("Done deploying the persistence unit.");
-
-		BenchmarkTest.LOG.info("Deploying the persistence unit...");
-
-		final EntityManager em = this.open(emf);
-		this.country = new Country();
-
-		this.country.setName("Turkey");
-		em.persist(this.country);
-
-		this.close(em);
-
-		this.threadIds = new long[BenchmarkTest.THREAD_COUNT];
-		this.currentThreadTimes = new long[BenchmarkTest.THREAD_COUNT];
-
-		BenchmarkTest.LOG.info("Done preparing the countries");
-
-		BenchmarkTest.LOG.info("Running the warm up phase with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS / 10);
-		LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<Runnable>();
-		ThreadPoolExecutor pool = this.createExecutor(workQueue);
-
-		// warm mup
-		this.test(emf, workQueue, BenchmarkTest.ITERATIONS / 10);
-		this.waitUntilFinish(pool);
-
-		BenchmarkTest.LOG.info("Done running warm up phase");
-
-		BenchmarkTest.LOG.info("Starting the benchmark with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS);
-
-		workQueue = new LinkedBlockingQueue<Runnable>();
-		pool = this.createExecutor(workQueue);
-
-		final long started = System.currentTimeMillis();
-		// for real
-		this.test(emf, workQueue, BenchmarkTest.ITERATIONS);
-		this.running = true;
-		this.waitUntilFinish(pool);
-		this.running = false;
-		this.totalTime = (System.currentTimeMillis() - started);
-
-		BenchmarkTest.LOG.info("Benchmark has been completed...");
-
 		try {
-			Thread.sleep(1000);
-		}
-		catch (final InterruptedException e) {}
+			final Map<String, Object> properties = Maps.newHashMap();
+			properties.put("eclipselink.persistencexml", classLoader.getPersistenceXmlPath());
 
-		emf.close();
+			final EntityManagerFactory emf = Persistence.createEntityManagerFactory(BenchmarkTest.TYPE.name().toLowerCase(), properties);
+
+			BenchmarkTest.LOG.info("Done deploying the persistence unit.");
+
+			BenchmarkTest.LOG.info("Deploying the persistence unit...");
+
+			final EntityManager em = this.open(emf);
+			this.country = new Country();
+
+			this.country.setName("Turkey");
+			em.persist(this.country);
+
+			this.close(em);
+
+			this.threadIds = new long[BenchmarkTest.THREAD_COUNT];
+			this.currentThreadTimes = new long[BenchmarkTest.THREAD_COUNT];
+
+			BenchmarkTest.LOG.info("Done preparing the countries");
+
+			BenchmarkTest.LOG.info("Running the warm up phase with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS / 10);
+			LinkedBlockingQueue<Runnable> workQueue = new LinkedBlockingQueue<Runnable>();
+			ThreadPoolExecutor pool = this.createExecutor(workQueue);
+
+			// warm mup
+			this.test(emf, workQueue, BenchmarkTest.ITERATIONS / 10);
+			this.waitUntilFinish(pool);
+
+			BenchmarkTest.LOG.info("Done running warm up phase");
+
+			BenchmarkTest.LOG.info("Starting the benchmark with {0} threads, {1} iterations...", BenchmarkTest.THREAD_COUNT, BenchmarkTest.ITERATIONS);
+
+			workQueue = new LinkedBlockingQueue<Runnable>();
+			pool = this.createExecutor(workQueue);
+
+			final long started = System.currentTimeMillis();
+			// for real
+			this.test(emf, workQueue, BenchmarkTest.ITERATIONS);
+			this.running = true;
+			this.waitUntilFinish(pool);
+			this.running = false;
+			this.totalTime = (System.currentTimeMillis() - started);
+
+			BenchmarkTest.LOG.info("Benchmark has been completed...");
+
+			try {
+				Thread.sleep(1000);
+			}
+			catch (final InterruptedException e) {}
+
+			emf.close();
+		}
+		catch (final Throwable t) {
+			BenchmarkTest.LOG.error(t, "An error occurred while running the benchmark");
+
+			throw new RuntimeException(t);
+		}
 	}
 
 	private void waitUntilFinish(ThreadPoolExecutor executor) {

@@ -39,6 +39,9 @@ public class TestClassLoader extends ClassLoader {
 	private static final String FULL_PERSISTENCE_XML = TestClassLoader.META_INF + TestClassLoader.PERSISTENCE_XML;
 	private static final String FULL_ORM_XML = TestClassLoader.META_INF + TestClassLoader.ORM_XML;
 	private final String db;
+	private final String persistenceXmlPath;
+
+	private final String ormXmlPath;
 
 	/**
 	 * @param parent
@@ -51,6 +54,19 @@ public class TestClassLoader extends ClassLoader {
 		super();
 
 		this.db = db;
+		this.persistenceXmlPath = TestClassLoader.META_INF + this.db + "_" + TestClassLoader.PERSISTENCE_XML;
+		this.ormXmlPath = TestClassLoader.META_INF + this.db + "_" + TestClassLoader.ORM_XML;
+	}
+
+	/**
+	 * Returns the persistence xml path.
+	 * 
+	 * @return the persistence xml path
+	 * 
+	 * @since $version
+	 */
+	public String getPersistenceXmlPath() {
+		return this.persistenceXmlPath;
 	}
 
 	/**
@@ -60,15 +76,11 @@ public class TestClassLoader extends ClassLoader {
 	@Override
 	public InputStream getResourceAsStream(String name) {
 		if (name.equals(TestClassLoader.FULL_PERSISTENCE_XML)) {
-			name = TestClassLoader.META_INF + this.db + "_" + TestClassLoader.PERSISTENCE_XML;
-
-			return super.getResourceAsStream(name);
+			return super.getResourceAsStream(this.persistenceXmlPath);
 		}
 
 		if (name.equals(TestClassLoader.FULL_ORM_XML)) {
-			name = TestClassLoader.META_INF + this.db + "_" + TestClassLoader.ORM_XML;
-
-			return super.getResourceAsStream(name);
+			return super.getResourceAsStream(this.ormXmlPath);
 		}
 
 		return super.getResourceAsStream(name);
