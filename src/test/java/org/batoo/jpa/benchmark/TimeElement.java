@@ -34,13 +34,23 @@ import com.google.common.collect.Lists;
  */
 public class TimeElement extends HashMap<String, TimeElement> implements Comparable<TimeElement> {
 
+	enum TimeType {
+		JPA,
+		JDBC,
+		DB
+	}
+
 	private static final long serialVersionUID = 1L;
-	private long time;
+
 	private long self;
 	private final String key;
-	private int hits;
-	private int selfHit;
-	private long timeWithoutDb;
+	private volatile int hits;
+	private volatile int selfHit;
+
+	private volatile long totalTime;
+	private volatile long jpaTime;
+	private volatile long jdbcTime;
+	private volatile long dbTime;
 
 	/**
 	 * @param key
@@ -53,26 +63,33 @@ public class TimeElement extends HashMap<String, TimeElement> implements Compara
 	}
 
 	/**
-	 * @param used
+	 * @param worked
 	 *            the time used
 	 * @param self
 	 *            time used by self
-	 * @param inDb
+	 * @param timeType
 	 *            time is in derby stack
 	 * 
 	 * @since 2.0.0
 	 */
-	public void addTime(long used, boolean self, boolean inDb) {
+	public void addTime(long worked, boolean self, TimeType timeType) {
 		this.hits++;
-		this.time += used;
+		this.totalTime += worked;
 
-		if (inDb) {
-			this.timeWithoutDb += used;
+		switch (timeType) {
+			case JPA:
+				this.jpaTime += worked;
+				break;
+			case JDBC:
+				this.jdbcTime += worked;
+				break;
+			default:
+				this.dbTime += worked;
 		}
 
 		if (self) {
 			this.selfHit++;
-			this.self += used;
+			this.self += worked;
 		}
 	}
 
@@ -90,42 +107,43 @@ public class TimeElement extends HashMap<String, TimeElement> implements Compara
 	 * 
 	 * @param type
 	 *            the benchmark type
-	 * @param jpaTotalTime
-	 *            the toal JPA time
+	 * @param totalTime
+	 *            the total time
+	 * @param jdbcTotalTime
+	 *            the total JDBC Time
 	 * @param dbTotalTime
 	 *            the total DB time
-	 * @param fullSummary
-	 *            if only number should be printed
+	 * @param jpaTotalTime
+	 *            the toal JPA time
 	 * 
 	 * @since 2.0.0
 	 */
-	public void dump0(Type type, MutableLong dbTotalTime, MutableLong jpaTotalTime, boolean fullSummary) {
+	public void dump0(Type type, MutableLong totalTime, MutableLong dbTotalTime, MutableLong jdbcTotalTime, MutableLong jpaTotalTime) {
 		final int nameStart = this.key.indexOf("doBenchmark");
 
 		if (nameStart > -1) {
-			final long dbTime = this.timeWithoutDb / 1000000;
-			final long jpaTime = (this.time - this.timeWithoutDb) / 1000000;
+			final long time = this.totalTime / 1000000;
+			final long dbTime = this.dbTime / 1000000;
+			final long jdbcTime = this.jdbcTime / 1000000;
+			final long jpaTime = this.jpaTime / 1000000;
 
+			totalTime.add(time);
 			dbTotalTime.add(dbTime);
+			jdbcTotalTime.add(jdbcTime);
 			jpaTotalTime.add(jpaTime);
 
-			if (fullSummary) {
-				System.err.println(//
-				String.format("%08d", dbTime) + //
-					" \t" + String.format("%08d", jpaTime));
-			}
-			else {
-				System.err.println(//
-				this.key.substring(nameStart + 11) + " Test" + //
-					" \t" + String.format("%08d", dbTime) + //
-					" \t" + String.format("%08d", jpaTime));
-			}
+			System.err.println(//
+			this.key.substring(nameStart + 11) + " Test" //
+				+ "\t" + String.format("%08d", time) //
+				+ "\t" + String.format("%08d", jpaTime) //
+				+ "\t" + String.format("%08d", jdbcTime) //
+				+ "\t" + String.format("%08d", dbTime));
 		}
 
 		final List<TimeElement> children = Lists.newArrayList(this.values());
 		Collections.sort(children);
 		for (final TimeElement child : children) {
-			child.dump0(type, dbTotalTime, jpaTotalTime, fullSummary);
+			child.dump0(type, totalTime, dbTotalTime, jdbcTotalTime, jpaTotalTime);
 		}
 	}
 
@@ -139,16 +157,18 @@ public class TimeElement extends HashMap<String, TimeElement> implements Compara
 	 * @since 2.0.0
 	 */
 	public int dump1(int rowNo, int depth) {
-		if ((depth > 0) && (this.timeWithoutDb > 10000000)) {
+		if (depth > 0) {
 			rowNo++;
 			final String tabs = StringUtils.repeat(" ", depth);
 			System.err.println(String.format("%010d", rowNo) + //
 				" " + String.format("%010d", depth) + //
 				" " + String.format("%010d", this.hits) + //
 				" " + String.format("%010d", this.selfHit) + //
-				" " + String.format("%010d", this.time / 1000000) + //
-				" " + String.format("%010d", this.timeWithoutDb / 1000000) + //
-				" " + String.format("%010d", this.self / 1000000) + //
+				" " + String.format("%010d", this.totalTime) + //
+				" " + String.format("%010d", this.jpaTime) + //
+				" " + String.format("%010d", this.jdbcTime) + //
+				" " + String.format("%010d", this.dbTime) + //
+				" " + String.format("%010d", this.self) + //
 				tabs + this.key);
 		}
 

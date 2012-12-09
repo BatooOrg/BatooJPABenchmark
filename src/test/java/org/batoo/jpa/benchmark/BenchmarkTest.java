@@ -51,6 +51,7 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.batoo.common.log.BLogger;
 import org.batoo.common.log.BLoggerFactory;
+import org.batoo.jpa.benchmark.TimeElement.TimeType;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -96,12 +97,9 @@ public class BenchmarkTest {
 	 */
 	private static final int SAMPLING_INT = Integer.valueOf(BenchmarkTest.getProp("interval", Integer.toString(5)));;
 
-	private static final boolean FULL_SUMMARY = BenchmarkTest.getProp("fullSummary", null) != null;
-
 	private static final BLogger LOG = BLoggerFactory.getLogger(BenchmarkTest.class);
 
-	private static final String SEPARATOR = "________________________________________";
-	private static final String LONG_SEPARATOR = "______________________________________________________";
+	private static final String SEPARATOR = "_________________________________________________________________________";
 
 	private static String getProp(String key, String defaultValue) {
 		final String value = System.getProperty(key);
@@ -312,9 +310,11 @@ public class BenchmarkTest {
 		return MessageFormat.format("{0} {1,number,00} hour(s) {2,number,00} min(s) {3,number,00} sec(s)", days, hours, mins, secs);
 	}
 
-	private boolean isInDb(final StackTraceElement stElement) {
-		return stElement.getClassName().startsWith("org.apache.derby") || stElement.getClassName().startsWith("com.mysql")
-			|| stElement.getClassName().startsWith("org.h2") || stElement.getClassName().startsWith("org.hsqldb");
+	private boolean isInDb(final String className) {
+		return className.startsWith("org.apache.derby") //
+			|| className.startsWith("com.mysql") //
+			|| className.startsWith("org.h2") //
+			|| className.startsWith("org.hsqldb");
 	}
 
 	/**
@@ -326,45 +326,41 @@ public class BenchmarkTest {
 		final ThreadPoolExecutor executor = this.postProcess();
 
 		if (BenchmarkTest.SUMMARIZE) {
-
 			this.waitUntilFinish(executor);
 
-			if (BenchmarkTest.SUMMARIZE && !BenchmarkTest.FULL_SUMMARY) {
-				System.err.println();
-				System.err.println();
-				System.err.println(BenchmarkTest.LONG_SEPARATOR);
-				System.err.println(MessageFormat.format(//
-					"Provider {0} | DB {1} | Threads {2} | Iterations {3}" + //
-						"\nTotal Run Time {4} (msec) | Samples Collected {5}", //
-					BenchmarkTest.TYPE, // 0
-					BenchmarkTest.DB, // 1
-					BenchmarkTest.THREAD_COUNT, // 2
-					BenchmarkTest.ITERATIONS, // 3
-					this.totalTime, // 4
-					this.profilingQueue.size() // 5
-				));
-				System.err.println(BenchmarkTest.LONG_SEPARATOR);
-				System.err.println("Test Name\tDB Time \tJPA Time   ");
-				System.err.println(BenchmarkTest.SEPARATOR);
-			}
+			System.err.println();
+			System.err.println();
+			System.err.println(BenchmarkTest.SEPARATOR);
+			System.err.println(MessageFormat.format(//
+				"Provider {0} | DB {1} | Threads {2} | Iterations {3}" + //
+					"\nTotal Run Time {4} (msec) | Samples Collected {5}", //
+				BenchmarkTest.TYPE, // 0
+				BenchmarkTest.DB, // 1
+				BenchmarkTest.THREAD_COUNT, // 2
+				BenchmarkTest.ITERATIONS, // 3
+				this.totalTime, // 4
+				this.profilingQueue.size() // 5
+			));
 
+			System.err.println(BenchmarkTest.SEPARATOR);
+			System.err.println("Test Name\tTotal Time\tJPA Time\tJDBC Time\tDB Time");
+			System.err.println(BenchmarkTest.SEPARATOR);
+
+			final MutableLong totalTime = new MutableLong(0);
 			final MutableLong dbTotalTime = new MutableLong(0);
+			final MutableLong jdbcTotalTime = new MutableLong(0);
 			final MutableLong jpaTotalTime = new MutableLong(0);
-			this.element.dump0(BenchmarkTest.TYPE, dbTotalTime, jpaTotalTime, BenchmarkTest.FULL_SUMMARY);
+			this.element.dump0(BenchmarkTest.TYPE, totalTime, dbTotalTime, jdbcTotalTime, jpaTotalTime);
 
-			if (!BenchmarkTest.FULL_SUMMARY) {
-				System.err.println(BenchmarkTest.SEPARATOR);
-				System.err.println(//
-				"TOTAL " + BenchmarkTest.TYPE.name() + //
-					" \t" + String.format("%08d", dbTotalTime.longValue()) + //
-					" \t" + String.format("%08d", jpaTotalTime.longValue()));
-				System.err.println(BenchmarkTest.LONG_SEPARATOR);
-				System.err.println();
-			}
-			else {
-				System.err.println();
-				System.err.println();
-			}
+			System.err.println(BenchmarkTest.SEPARATOR);
+			System.err.println(//
+			"TOTAL " + BenchmarkTest.TYPE.name() + //
+				" \t" + String.format("%08d", totalTime.longValue()) + //
+				" \t" + String.format("%08d", jpaTotalTime.longValue()) + //
+				" \t" + String.format("%08d", jdbcTotalTime.longValue()) + //
+				" \t" + String.format("%08d", dbTotalTime.longValue()));
+			System.err.println(BenchmarkTest.SEPARATOR);
+			System.err.println();
 		}
 		else {
 			this.element.dump1(0, 0);
@@ -412,19 +408,26 @@ public class BenchmarkTest {
 	}
 
 	private void measureTime(long worked, ThreadInfo threadInfo) {
-		TimeElement child = this.element;
 		boolean gotStart = false;
-		boolean last = false;
 
-		boolean inDb = false;
 		if (threadInfo == null) {
 			return;
 		}
 
+		TimeElement child = this.element;
+		TimeType timeType = TimeType.JPA;
+
 		for (int i = threadInfo.getStackTrace().length - 1; i >= 0; i--) {
 			final StackTraceElement stElement = threadInfo.getStackTrace()[i];
-			if (this.isInDb(stElement)) {
-				inDb = true;
+
+			final String className = stElement.getClassName();
+
+			if ((timeType == TimeType.JPA) && this.isInDb(className)) {
+				timeType = TimeType.JDBC;
+			}
+
+			if (className.startsWith("java.net.So")) {
+				timeType = TimeType.DB;
 				break;
 			}
 		}
@@ -437,30 +440,22 @@ public class BenchmarkTest {
 			}
 
 			gotStart = true;
+			TimeElement child2;
 
 			final String key = BenchmarkTest.SUMMARIZE ? //
 				stElement.getClassName() + "." + stElement.getMethodName() : //
 				stElement.getClassName() + "." + stElement.getMethodName() + "." + stElement.getLineNumber();
 
-			child = child.get(key);
-			TimeElement child2 = this.elements.get(key);
-			if (child2 == null) {
-				this.elements.put(key, child2 = new TimeElement(key));
+			synchronized (this) {
+				child = child.get(key);
+				child2 = this.elements.get(key);
+				if (child2 == null) {
+					this.elements.put(key, child2 = new TimeElement(key));
+				}
 			}
 
-			if (this.isInDb(stElement) || (i == 0)) {
-				child.addTime(worked, true, inDb);
-				child2.addTime(worked, true, inDb);
-				last = true;
-			}
-			else {
-				child.addTime(worked, false, inDb);
-				child2.addTime(worked, false, inDb);
-			}
-
-			if (last) {
-				break;
-			}
+			child.addTime(worked, (i == 0), timeType);
+			child2.addTime(worked, (i == 0), timeType);
 		}
 	}
 
@@ -525,16 +520,18 @@ public class BenchmarkTest {
 			final ThreadInfo threadInfo = threadInfos[i];
 
 			final long newThreadTime = mxBean.getThreadCpuTime(id);
-			final long worked = Math.abs(newThreadTime - this.currentThreadTimes[i]);
-			this.currentThreadTimes[i] = newThreadTime;
+			final long worked = newThreadTime - this.currentThreadTimes[i];
+			if (worked > 0) {
+				this.currentThreadTimes[i] = newThreadTime;
 
-			profilingQueue.add(new Runnable() {
+				profilingQueue.add(new Runnable() {
 
-				@Override
-				public void run() {
-					BenchmarkTest.this.measureTime(worked, threadInfo);
-				}
-			});
+					@Override
+					public void run() {
+						BenchmarkTest.this.measureTime(worked, threadInfo);
+					}
+				});
+			}
 		}
 	}
 
