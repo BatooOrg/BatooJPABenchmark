@@ -37,7 +37,7 @@
 			<property name="javax.persistence.jdbc.driver" value="org.postgresql.Driver" />
 			<property name="javax.persistence.jdbc.url" value="jdbc:postgresql://localhost/test" />
 			<property name="javax.persistence.jdbc.user" value="postgres" />
-			<property name="javax.persistence.jdbc.password" value="toor" />
+			<property name="javax.persistence.jdbc.password" value="" />
 
 			<!-- Batoo Logging -->
 <!-- 			<property name="org.batoo.jpa.sql_logging" value="STDOUT"/> -->

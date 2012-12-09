@@ -106,6 +106,7 @@ public class BenchmarkTest extends AbstractBenchmark {
 
 	private boolean isInDb(final String className) {
 		return className.startsWith("org.apache.derby") //
+			|| className.startsWith("org.postgresql") //
 			|| className.startsWith("com.mysql") //
 			|| className.startsWith("org.h2") //
 			|| className.startsWith("org.hsqldb");
@@ -333,7 +334,7 @@ public class BenchmarkTest extends AbstractBenchmark {
 	}
 
 	/**
-	 * Main test entry point
+	 * SocketTest test entry point
 	 * 
 	 * @since $version
 	 */
