@@ -34,8 +34,8 @@
 		<properties>
 			<property name="org.batoo.jpa.ddl" value="DROP" />
 		
-			<property name="javax.persistence.jdbc.driver" value="com.mysql.jdbc.Driver" />
-			<property name="javax.persistence.jdbc.url" value="jdbc:mysql://localhost/test?holdResultsOpenOverStatementClose=false&amp;useServerPrepStmts=true" />
+			<property name="javax.persistence.jdbc.driver" value="org.batoo.jdbc.mysql.Driver" />
+			<property name="javax.persistence.jdbc.url" value="jdbc:mysql:batoo://localhost/test" />
 			<property name="javax.persistence.jdbc.user" value="root" />
 			<property name="javax.persistence.jdbc.password" value="" />
 

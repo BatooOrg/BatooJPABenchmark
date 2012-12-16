@@ -198,7 +198,7 @@ public class Benchmark extends AbstractBenchmark implements BenchmarkMBean {
 	}
 
 	private void doRemove(final EntityManagerFactory emf, Person[][] people) {
-		for (int i = 0; i < (people.length); i++) {
+		for (int i = 0; i < (people.length / 2); i++) {
 			final Person[] persons = people[i];
 			for (Person person : persons) {
 				final EntityManager em = this.open(emf);

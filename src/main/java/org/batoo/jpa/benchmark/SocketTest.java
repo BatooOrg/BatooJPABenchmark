@@ -38,7 +38,7 @@ public class SocketTest {
 
 	private static final BLogger LOG = BLoggerFactory.getLogger(SocketTest.class);
 
-	private static final int NO_SOCKS = 4;
+	private static final int NO_SOCKS = 1;
 	private static final int PORT = 3306;
 
 	/**
@@ -85,7 +85,7 @@ public class SocketTest {
 
 				writeSize += element.length;
 				if (writeSize > 5000000) {
-					SocketTest.LOG.info("5 MB mark");
+					SocketTest.LOG.info("1 MB mark");
 					writeSize = 0;
 				}
 

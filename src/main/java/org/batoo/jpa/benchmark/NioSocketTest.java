@@ -38,8 +38,8 @@ public class NioSocketTest {
 
 	private static final BLogger LOG = BLoggerFactory.getLogger(NioSocketTest.class);
 
-	private static final int NO_SOCKS = 1;
-	private static final int PORT = 3306;
+	private static final int NO_SOCKS = 8;
+	private static final int PORT = 3305;
 
 	/**
 	 * @param args
@@ -70,24 +70,28 @@ public class NioSocketTest {
 		}
 	}
 
-	private void simulateComm(final SocketChannel channel) throws IOException {
-		final ByteBuffer in = ByteBuffer.allocateDirect(8192);
-		final ByteBuffer out = ByteBuffer.allocateDirect(8192);
+	private void simulateComm(final SocketChannel channel, boolean sendFirst) throws IOException {
+		final ByteBuffer in = ByteBuffer.allocate(65536);
+		final ByteBuffer out = ByteBuffer.allocate(65536);
 
 		long readSize = 0;
 
 		while (true) {
 			for (final byte[] element : this.sample) {
-				out.put(element);
-				out.put((byte) '\n');
+				if (sendFirst) {
+					out.put(element);
+					out.put((byte) '\n');
 
-				out.flip();
+					out.flip();
 
-				while (out.hasRemaining()) {
-					channel.write(out);
+					while (out.hasRemaining()) {
+						channel.write(out);
+					}
+
+					out.clear();
+
 				}
-
-				out.clear();
+				sendFirst = true;
 
 				readSize += element.length;
 				if (readSize > 5000000) {
@@ -124,7 +128,7 @@ public class NioSocketTest {
 					final SocketChannel channel = SocketChannel.open();
 					channel.connect(new InetSocketAddress("localhost", NioSocketTest.PORT));
 
-					NioSocketTest.this.simulateComm(channel);
+					NioSocketTest.this.simulateComm(channel, true);
 				}
 				catch (final Exception e) {}
 			}
@@ -138,7 +142,7 @@ public class NioSocketTest {
 	 * @since $version
 	 */
 	private void startServer() throws Exception {
-		this.generateData(5000);
+		this.generateData(1000);
 
 		final ServerSocketChannel server = ServerSocketChannel.open();
 		server.bind(new InetSocketAddress(NioSocketTest.PORT));
@@ -156,7 +160,7 @@ public class NioSocketTest {
 						@Override
 						public void run() {
 							try {
-								NioSocketTest.this.simulateComm(clientChannel);
+								NioSocketTest.this.simulateComm(clientChannel, false);
 							}
 							catch (final IOException e) {
 								NioSocketTest.LOG.error(e, "");

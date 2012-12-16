@@ -123,7 +123,7 @@ public class AbstractBenchmark {
 					final Thread t = new Thread(r);
 					t.setDaemon(true);
 					t.setPriority(Thread.NORM_PRIORITY);
-					t.setName(prefix + "-" + nextThreadNo.get());
+					t.setName(prefix + "-" + nextThreadNo.incrementAndGet());
 
 					return t;
 				}

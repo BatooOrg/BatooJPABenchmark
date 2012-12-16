@@ -109,7 +109,8 @@ public class BenchmarkTest extends AbstractBenchmark {
 			|| className.startsWith("org.postgresql") //
 			|| className.startsWith("com.mysql") //
 			|| className.startsWith("org.h2") //
-			|| className.startsWith("org.hsqldb");
+			|| className.startsWith("org.hsqldb") //
+			|| className.startsWith("org.batoo.jdbc.mysql");
 	}
 
 	private void measureTime(long worked, StackTraceElement[] stackTrace) {
@@ -127,7 +128,7 @@ public class BenchmarkTest extends AbstractBenchmark {
 				timeType = TimeType.JDBC;
 			}
 
-			if (className.startsWith("java.net.So")) {
+			if (className.startsWith("java.net") || className.startsWith("sun.nio")) {
 				timeType = TimeType.DB;
 				break;
 			}

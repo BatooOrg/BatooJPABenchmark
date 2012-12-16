@@ -184,6 +184,12 @@
 		</dependency>
 
 		<dependency>
+			<groupId>org.batoo.jdbc</groupId>
+			<artifactId>mysql</artifactId>
+			<version>0.0.1-SNAPSHOT</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
 			<groupId>commons-dbutils</groupId>
 			<artifactId>commons-dbutils</artifactId>
 			<scope>test</scope>
